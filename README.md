@@ -1,126 +1,124 @@
 ## Project architecture
 
-The project follows a simple analytics-engineering workflow that separates ingestion, data validation, transformation, modelling, analysis, and presentation.
+The project follows a layered analytics-engineering workflow that separates ingestion, validation, cleaning, modelling, analysis, and presentation.
 
 ```mermaid
-flowchart TD
-    A[Install CSV] --> C[build_database.py]
-    B[Revenue CSV] --> C
+flowchart LR
+    subgraph A[Source data]
+        A1[installs.csv<br/>Install-level data]
+        A2[revenue.csv<br/>Event-level data]
+    end
 
-    C --> D[(SQLite Database)]
+    subgraph B[Ingestion]
+        B1[build_database.py]
+        B2[(SQLite Database)]
+    end
 
-    D --> E[installs_raw]
-    D --> F[revenue_raw]
+    subgraph C[Raw models]
+        C1[installs_raw]
+        C2[revenue_raw]
+    end
 
-    E --> G[Data Quality Checks]
-    F --> G
+    subgraph D[Validation and cleaning]
+        D1[Data-quality checks]
+        D2[installs_clean<br/>One row per install]
+        D3[revenue_clean<br/>One row per revenue event]
+    end
 
-    G --> H[installs_clean]
-    G --> I[revenue_clean]
+    subgraph E[Analytical modelling]
+        E1[app_installs<br/>Filtered install cohort]
+        E2[month_revenue<br/>Revenue aggregated by install]
+        E3[LEFT JOIN]
+        E4[app_analysis_base<br/>One row per analysed install]
+    end
 
-    H --> J[app_installs CTE]
-    I --> K[month_revenue CTE]
+    subgraph F[Analytics outputs]
+        F1[Headline metrics]
+        F2[Network analysis]
+        F3[Country analysis]
+        F4[Version analysis]
+        F5[Daily cohort analysis]
+        F6[Matplotlib charts]
+        F7[Tableau dashboard]
+        F8[Business report]
+    end
 
-    K --> L[Aggregate Revenue to Install Grain]
-    J --> M[LEFT JOIN]
-    L --> M
+    A1 --> B1
+    A2 --> B1
+    B1 --> B2
 
-    M --> N[app_analysis_base]
+    B2 --> C1
+    B2 --> C2
 
-    N --> O[Headline Metrics]
-    N --> P[Network Analysis]
-    N --> Q[Country Analysis]
-    N --> R[App Version Analysis]
-    N --> S[Daily Cohort Analysis]
+    C1 --> D1
+    C2 --> D1
+    D1 --> D2
+    D1 --> D3
 
-    O --> T[Python Summary]
-    P --> U[Matplotlib Charts]
-    Q --> U
-    R --> U
-    S --> U
+    D2 --> E1
+    D3 --> E2
+    E1 --> E3
+    E2 --> E3
+    E3 --> E4
 
-    N --> V[Tableau Dashboard]
-    U --> W[Business Report]
-    V --> W
+    E4 --> F1
+    E4 --> F2
+    E4 --> F3
+    E4 --> F4
+    E4 --> F5
+
+    F1 --> F8
+    F2 --> F6
+    F3 --> F6
+    F4 --> F6
+    F5 --> F6
+    E4 --> F7
+    F6 --> F8
+    F7 --> F8
 ```
 
 ### Architecture layers
 
-| Layer              | Purpose                                                                             |
-| ------------------ | ----------------------------------------------------------------------------------- |
-| Source layer       | Contains install-level and event-level CSV files                                    |
-| Ingestion layer    | Loads and standardizes the source files with `build_database.py`                    |
-| Raw layer          | Stores source-aligned tables in SQLite                                              |
-| Validation layer   | Checks duplicates, missing keys, orphan records, date coverage, and event anomalies |
-| Cleaning layer     | Produces one row per install and one row per revenue event                          |
-| Modelling layer    | Aggregates revenue to install grain and creates the central analysis table          |
-| Metrics layer      | Calculates profitability, ARPI, ARPPU, ROAS, ROI, and payer rate                    |
-| Presentation layer | Produces charts, Tableau views, and business recommendations                        |
+| Layer        | Purpose                                                                        |
+| ------------ | ------------------------------------------------------------------------------ |
+| Source       | Install-level and revenue-event CSV files                                      |
+| Ingestion    | Loads and standardizes source files using `build_database.py`                  |
+| Raw models   | Stores source-aligned data in SQLite                                           |
+| Validation   | Checks duplicate keys, missing IDs, orphan records, dates, and event anomalies |
+| Cleaning     | Creates one row per install and one row per unique revenue event               |
+| Modelling    | Aggregates revenue to install grain and creates the central analytical table   |
+| Metrics      | Calculates profitability, ARPI, ARPPU, ROAS, ROI, and payer rate               |
+| Presentation | Produces Python charts, a Tableau dashboard, and business recommendations      |
 
 ---
 
-## Data flow
+## Core data model
 
-```text
-Install CSV                     Revenue CSV
-     |                               |
-     +--------------+----------------+
-                    |
-                    v
-             build_database.py
-                    |
-                    v
-               SQLite database
-                    |
-          +---------+---------+
-          |                   |
-          v                   v
-    installs_raw         revenue_raw
-          |                   |
-          v                   v
-   installs_clean       revenue_clean
-          |                   |
-          |          aggregate by install ID
-          |                   |
-          +---------+---------+
-                    |
-                 LEFT JOIN
-                    |
-                    v
-          app_analysis_base
-          one row per install
-                    |
-        +-----------+------------+
-        |           |            |
-        v           v            v
-     Metrics      Charts      Tableau
+The source tables have different grains:
+
+```mermaid
+flowchart LR
+    A[installs_clean<br/>One row per install]
+
+    B[revenue_clean<br/>One row per revenue event]
+    B --> C[GROUP BY user_install_id]
+
+    C --> D[month_revenue<br/>One row per install]
+
+    A --> E[LEFT JOIN]
+    D --> E
+
+    E --> F[app_analysis_base<br/>One row per analysed install]
 ```
 
----
-
-## Table relationships
+One installation may generate zero, one, or many revenue events:
 
 ```mermaid
 erDiagram
-    INSTALLS_RAW {
-        string user_install_id
-        integer client
-        string geo_country_code
-        string client_version
-        integer network_id
-        date install_event_date
-    }
-
-    REVENUE_RAW {
-        string id
-        string user_install_id
-        float money_value_usd
-        integer event_count
-        date event_date
-    }
+    INSTALLS_CLEAN ||--o{ REVENUE_CLEAN : "generates"
 
     INSTALLS_CLEAN {
-        string user_install_id
+        string user_install_id PK
         integer client
         string geo_country_code
         string client_version
@@ -129,52 +127,43 @@ erDiagram
     }
 
     REVENUE_CLEAN {
-        string id
-        string user_install_id
+        string id PK
+        string user_install_id FK
         float money_value_usd
         integer event_count
         date event_date
     }
-
-    APP_ANALYSIS_BASE {
-        string user_install_id
-        string geo_country_code
-        string client_version
-        integer network_id
-        date install_event_date
-        float revenue
-    }
-
-    INSTALLS_RAW ||--|| INSTALLS_CLEAN : deduplicated_to
-    REVENUE_RAW ||--|| REVENUE_CLEAN : deduplicated_to
-    INSTALLS_CLEAN ||--o{ REVENUE_CLEAN : user_install_id
-    INSTALLS_CLEAN ||--|| APP_ANALYSIS_BASE : modelled_to
 ```
+
+Revenue is aggregated before the join to prevent:
+
+* Duplicate install counts
+* Repeated acquisition costs
+* Inflated segment volume
+* Incorrect ARPI and profitability calculations
 
 ---
 
 ## Data grain
 
-The most important modelling decision was defining what one row represents in each table.
-
-| Table               | Grain                                                                |
+| Model               | Grain                                                                |
 | ------------------- | -------------------------------------------------------------------- |
-| `installs_raw`      | Intended one row per app install, with duplicate IDs present         |
-| `revenue_raw`       | Intended one row per revenue event, with duplicate event IDs present |
+| `installs_raw`      | Intended one row per app install; duplicate IDs were present         |
+| `revenue_raw`       | Intended one row per revenue event; duplicate event IDs were present |
 | `installs_clean`    | One row per unique `user_install_id`                                 |
 | `revenue_clean`     | One row per unique revenue-event `id`                                |
 | `month_revenue`     | One row per install ID with aggregated monthly revenue               |
 | `app_analysis_base` | One row per analysed install with total attributed revenue           |
 
-Revenue is aggregated before the join because one installation can generate multiple revenue events.
+> Rename `app_analysis_base` to `app174_base` here when that is still the name used in the Python and SQL code.
 
 ---
 
-## Data preview
+## Synthetic data preview
+
+The original source data is not included. The examples below are synthetic records that reproduce the project’s data structure.
 
 ### Install-level source data
-
-Example structure:
 
 | user_install_id | client | country | version | network_id | install_date |
 | --------------- | -----: | ------- | ------: | ---------: | ------------ |
@@ -182,11 +171,9 @@ Example structure:
 | install_002     |    174 | FR      |     504 |         60 | 2024-04-24   |
 | install_003     |    174 | US      |     502 |         58 | 2024-04-08   |
 
-One row represents one app installation.
+**Grain:** one row represents one app installation.
 
 ### Revenue-event source data
-
-Example structure:
 
 | event_id  | user_install_id | money_value_usd | event_count | event_date |
 | --------- | --------------- | --------------: | ----------: | ---------- |
@@ -194,11 +181,9 @@ Example structure:
 | event_002 | install_001     |            2.10 |           1 | 2024-04-07 |
 | event_003 | install_002     |            0.75 |           1 | 2024-04-25 |
 
-One install may appear in multiple revenue-event rows.
+**Grain:** one row represents one revenue event. One installation may appear in several rows.
 
 ### Final install-level analytical model
-
-Example structure:
 
 | user_install_id | country | version | network_id | install_date | revenue |
 | --------------- | ------- | ------: | ---------: | ------------ | ------: |
@@ -206,74 +191,133 @@ Example structure:
 | install_002     | FR      |     504 |         60 | 2024-04-24   |    0.75 |
 | install_003     | US      |     502 |         58 | 2024-04-08   |    0.00 |
 
-The final model contains one row per install. Revenue events are summed before being joined to the installation record.
+**Grain:** one row per analysed installation, including installations with zero revenue.
 
 ---
 
-## Data transformation example
+## Transformation example
 
-### Before aggregation
+Before aggregation, one installation may have multiple revenue events:
 
 ```text
-Install ID: install_001
-
-Revenue events:
-$1.25
-$2.10
-$0.75
+install_001
+├── $1.25
+├── $2.10
+└── $0.75
 ```
 
-### After aggregation
+After aggregation:
 
 ```text
 install_001 total revenue = $4.10
 ```
 
-### Final model
+Final model:
 
 ```text
-One install row
+One installation row
 +
 One aggregated revenue value
 =
-Safe profitability calculation
+Correct acquisition and profitability calculations
 ```
-
-This prevents one installation from being counted multiple times.
 
 ---
 
-## Dashboard preview
+## Tableau Dashboard preview
 
-### Tableau overview
+The Tableau dashboard presents:
 
-The dashboard presents:
 * Headline profitability metrics
 * Network-level profit contribution
-* Revenue per install versus break-even
-* Country comparison
+* Revenue per install compared with break-even
+* Country performance
 * App-version performance
-* Daily install cohort performance
+* Daily install-cohort performance
 
-![Tableau dashboard](https://github.com/Noor-Ahmed-12/mobile-app-analytics-engineering/blob/main/tableau/tablaueDsh.png)
+<p align="center">
+  <a href="https://github.com/Noor-Ahmed-12/mobile-app-analytics-engineering/blob/main/tableau/App%20174%20Performance%20Overview.pdf">
+    <img
+      src="https://github.com/Noor-Ahmed-12/mobile-app-analytics-engineering/blob/main/tableau/tablaueDsh.png"
+      alt="Tableau mobile app performance dashboard"
+      width="850"
+    >
+  </a>
+</p>
 
+<p align="center">
+  <em>Click the dashboard to open the complete PDF.</em>
+</p>
 
-### Network profitability
+---
 
-![Network profit chart](charts/net_profit_by_network.png)
+## Key visualisations
 
-### Network ARPI versus break-even
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img
+        src="charts/net_profit_by_network.png"
+        alt="Net profit by acquisition network"
+        width="420"
+      >
+      <br>
+      <strong>Network profitability</strong>
+      <br>
+      <sub>Shows which acquisition sources created or reduced total profit.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img
+        src="charts/arpi_by_network.png"
+        alt="Revenue per install by network"
+        width="420"
+      >
+      <br>
+      <strong>Network ARPI versus break-even</strong>
+      <br>
+      <sub>Compares network unit economics with the break-even threshold.</sub>
+    </td>
+  </tr>
 
-![Network ARPI chart](charts/arpi_by_network.png)
-
-### Country profitability
-
-![Country profit chart](charts/profit_by_country.png)
-
-### App-version profitability
-
-![App version chart](charts/net_profit_by_version.png)
+  <tr>
+    <td align="center" width="50%">
+      <img
+        src="charts/profit_by_country.png"
+        alt="Net profit by country"
+        width="420"
+      >
+      <br>
+      <strong>Country profitability</strong>
+      <br>
+      <sub>Highlights substantial monetisation differences between markets.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img
+        src="charts/net_profit_by_version.png"
+        alt="Net profit by app version"
+        width="420"
+      >
+      <br>
+      <strong>App-version profitability</strong>
+      <br>
+      <sub>Surfaces version-level performance and possible tracking issues.</sub>
+    </td>
+  </tr>
+</table>
 
 ### Daily cohort performance
 
-![Daily cohort chart](https://github.com/Noor-Ahmed-12/mobile-app-analytics-engineering/blob/main/charts/daily_trend.png)
+<p align="center">
+  <img
+    src="charts/daily_trend.png"
+    alt="Daily installs and cohort profitability"
+    width="720"
+  >
+</p>
+
+<p align="center">
+  <em>
+    Late-month cohorts had less time to generate revenue, so their results
+    should be interpreted with caution.
+  </em>
+</p>

@@ -155,7 +155,6 @@ Revenue is aggregated before the join to prevent:
 | `month_revenue`     | One row per install ID with aggregated monthly revenue               |
 | `app_analysis_base` | One row per analysed install with total attributed revenue           |
 
-> Rename `app_analysis_base` to `app174_base` here when that is still the name used in the Python and SQL code.
 
 ---
 
